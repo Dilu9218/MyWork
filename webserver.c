@@ -1,211 +1,164 @@
+//you need to have a folder named "File" containing different formats.The path in the code below will give a hint.
+
+
 #include <stdio.h>
-#include <stdlib.h>
-#include <netdb.h>
 #include <netinet/in.h>
-#include <string.h>
+#include <sys/socket.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/sendfile.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <sys/sendfile.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/stat.h>
+#include <limits.h>
 
-/*to run----> 
-gcc webserver.c -o webserver
-./webserver  */
 
-#define MAX_BUF 2048
+#define LENGTH 512
 
-typedef struct {
- char *ext;
- char *filetype;
-} exten;
+int main(){
+    int createSocket, newSocket;
+    socklen_t addrlen;
+    int bufsize = 1024;
+    char *buffer = malloc(bufsize);
+    struct sockaddr_in address;
+    struct stat stat_buf;
 
-//file types to be handled
-exten extensions[] ={ {"gif", "image/gif" },{"jpg", "image/jpg" }, {"png", "image/png" }, {"ico", "image/ico" },
- {"htm", "text/html" }, {"html","text/html" }, {"php", "text/html" }, {"pdf","application/pdf"}, {0,0} };
+    if((createSocket = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+        perror("socket failed!");
+    }else {
+        printf("The socket was created\n");
+        //return 1;
 
-void handleRequest(char request[50]){
- char *ptr;
-// Check for a valid browser request
- ptr = strstr(request, " HTTP/");
- if (ptr == NULL) {
-  printf("NOT HTTP !\n");
- } else {
-  *ptr = 0;
-  ptr = NULL;
-
-  if (strncmp(request, "GET ", 4) == 0) {
-   printf("valid GET");
-   ptr = request + 4;
-  }
-  if (ptr == NULL) {
-   printf("Unknown Request ! \n");
-  }
- }
-}
-//---------------------------------------------------------------------------------------------------------------------------
-void handleFiles(int newsockfd, char request[50]){
-    char requestFilename[80];   /* request with filename to send */
-    int fd;                    /* file descriptor for file to send */
-    struct stat stat_buf;      /* argument to fstat */
-    off_t offset = 0;          /* file offset */
-    int rc;
-    char path[MAX_BUF];
-    //char header[100];    
-
-    rc = recv(newsockfd, requestFilename, sizeof(requestFilename), 0);
-    if (rc == -1) {
-      fprintf(stderr, "recv failed: %s\n", strerror(errno));
-      exit(1);
     }
-    char *filename= strtok(requestFilename, " ");
-    filename=strtok(NULL, " ");
-    strsep(&filename,"/");
-    printf("%s",filename);
-    fprintf(stderr, "received request to send file %s\n", filename);
-    char* s ;
-    s= strchr(filename, '.');
-    printf("content of s= %x ,%s\n", *s,filename);
-    int i;
-    for (i = 0; extensions[i].ext != NULL; i++) {
-      if (strcmp(s + 1, extensions[i].ext) == 0) {
-	//for php
-	if(strcmp(extensions[i].ext, "php") == 0) {
-         printf("\tExecuting PHP file.\n");
-         //close(fd); 
-	 FILE *filep;
-	 int MAXSIZE = 0xFFF;
-	 filep= popen("php -f /home/dilushi/4thyear1stSem/networks/webserver/browser.php", "r");
-       	 int fno = fileno(filep);
-	 if(!filep){
-          fprintf(stderr, "Could not open pipe for output.\n");
-          }
-	 if(filep==NULL){
-          printf("Could not open pipe for output.\n");
-          }
-	 char str[100000];
-	 int nbyte= 100000;
 
-         char *type = "text/html";
-         char header[100];
-         sprintf(header, "HTTP/1.1 200 OK\n Content-Type: %s; charset=utf-8  \n\n", type);
-         write(newsockfd, header, strlen(header));
-	 //send(newsockfd, header, strlen(header), 0);
-	 
-	 while (fgets (str, 99999, filep)!=NULL ){
-		int bytes= write(newsockfd, str, strlen(str));
-	 }
-	 pclose(filep);
- 
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(8000);
+    if(bind(createSocket, (struct sockaddr *) &address, sizeof(address)) == 0){
+        printf("Binding Socket\n");
+    }
+
+    while(1){
+        if (listen(createSocket, 10) < 0){
+            perror("server: listen");
+            exit(1);
+        }
+
+    if((newSocket = accept(createSocket,(struct sockaddr *) &address, &addrlen)) < 0){
+        perror("server : accept");
+        exit(1);
+    }
+
+    if(newSocket > 0){
+        printf("The client is connected...\n");
+
 }
-	else{
-	char *type;
-	type= extensions[i].filetype;
-       	fd = open(filename, O_RDONLY); /*  open the file to be sent */
-       	printf("Opening \"%s\"\n", filename);
-       		if (fd == -1) {
-			char *msg;	
-			char header[100];
-			sprintf(header, "HTTP/1.1 404 FILE NOT FOUND\n Content-Type: %s; charset=utf-8  \n\n", type);
-			write(newsockfd, header, strlen(header));
-			//msg= "<html><head><title>404 Not Found</head></title>";
-			//int len = strlen(msg);
-			//send(newsockfd, msg, len, 0);
-			/*if (send(newsockfd, msg, len, 0) == -1) {
-			  printf("Error in send\n");
-			}*/
-        		exit(1);
-       		}	
-	
-    /* get the size of the file to be sent */
+    recv(newSocket, buffer, bufsize, 0);
+    char *token = strtok(buffer, " ");
+        token = strtok(NULL, " ");
+        char fullpath[20];
+        char sdbuf[LENGTH];
+        char *type;
+        char *extension;
+        char phpCommand[50];
+        FILE* f;
+        FILE* pipein_fp;
+        FILE* pipeout_fp;
+        char readbuf[800];
+        char header[100];
+
+        if(strcmp(token,"/")==0)
+        {
+            strcpy(fullpath, "/home/dilushi/WebServer/Files");
+            strcat(fullpath, "/index.html");
+            type = "text/html";
+        }
+        else{
+            strcpy(fullpath, "/home/dilushi/WebServer/Files");
+            char* filename = token;
+            strcat(fullpath, token);
+            printf("%s\n",fullpath);
+            extension = strsep(&token, ".");
+            printf("%s\n",token);
+            int s=strlen(token);
+            printf("%d\n",s);
+            if(strcmp(token, "html")==0)
+            {
+                type = "text/html";
+                printf("%s\n",type);
+            }
+            else if(strcmp(token, "txt")==0)
+            {
+                type = "text/plain";
+            }
+            else if(strcmp(token, "jpeg")==0)
+            {
+                type = "image/jpeg";
+            }
+            else if(strcmp(token, "png")==0)
+            {
+                type = "image/png";
+            }
+            else if(strcmp(token, "mp4")==0)
+            {
+                type = "video/mp4";
+            }
+            else if(strcmp(token, "php")==0)
+            {
+                strcpy(phpCommand,"php -f ");
+                strcat(phpCommand,"/home/dilushi/WebServer/Files/");
+                strcat(phpCommand,filename);
+                strcat(phpCommand,".");
+                strcat(phpCommand,"php");
+                type = "text/php";
+                FILE *in;
+                extern FILE *popen();
+                char buff[512];
+
+
+                if(!(in = popen(phpCommand, "r"))){
+                    exit(1);
+                    printf("open");
+                }
+
+                while(fgets(buff, sizeof(buff), in)!=NULL){
+                    printf("%s", buff);
+                    write(newSocket,buff,strlen(buff));
+                }
+                pclose(in);
+                return 0;
+
+            }
+            else{
+            type = "text/nf";
+            printf("Not found");
+            }
+        }
+
+    off_t offset = 0;
+
+    int fd = open(fullpath, O_RDONLY);
+    int msgSize = sizeof(fd);
+    if (fd == -1) {
+      sprintf(header, "HTTP/1.1 404 FILE NOT FOUND\n Content-Type: %s; charset=utf-8  \n\n", type);
+    }
+
+    else{
     fstat(fd, &stat_buf);
-    char header[100];
-    sprintf(header, "HTTP/1.1 200 OK\n Content-Type: %s; charset=utf-8  \n\n", type);
-    write(newsockfd, header, strlen(header));
+    sprintf(header, "HTTP/1.1 200 OK\n Content-Type: %s; charset=utf-8  \n\n", type);}
+    int sizeMsg = strlen(header);
+    write(newSocket, header, sizeMsg);
+
     /* copy file using sendfile */
     offset = 0;
-    rc = sendfile (newsockfd, fd, &offset, stat_buf.st_size);
-    printf("file sending\n");
-    if (rc == -1) {
-      fprintf(stderr, "error from sendfile: %s\n", strerror(errno));
-      exit(1);
-    }
-    if (rc != stat_buf.st_size) {
-      fprintf(stderr, "incomplete transfer from sendfile: %d of %d bytes\n", rc, (int)stat_buf.st_size);
-      exit(1);
-    }
-    printf("file sent\n");
-    /* close descriptor for file that was sent */
+    printf("SEND FILE interpret");
+    sendfile (newSocket, fd, &offset, stat_buf.st_size);
+    close(newSocket);
     close(fd);
- }
 }
-}
-   }
-
-//----------------------------------------------------------------------------------------------------------------------------------------
-int main( int argc, char *argv[] ) {
-   int sockfd, newsockfd, portno, clilen, pid;
-   char buffer[256];
-   struct sockaddr_in serv_addr, cli_addr;
-   int  n;
-   
-   /* dilushi: sockfd is integer returned after socket()*/
-   sockfd = socket(AF_INET, SOCK_STREAM, 0);
-   
-   if (sockfd < 0) {
-      perror("ERROR opening socket");
-      exit(1);
-   }
-   
-   /* Initialize socket structure */
-/*dilushi: bzero fills struct with 0s*/
-   bzero((char *) &serv_addr, sizeof(serv_addr));
-   portno = 5001;
-   
-   serv_addr.sin_family = AF_INET;
-   serv_addr.sin_addr.s_addr = INADDR_ANY;
-   serv_addr.sin_port = htons(portno);
-   
-/*dilushi: socket and ip address binding,here it is localhost*/
-   if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
-      perror("ERROR on binding");
-      exit(1);
-   } 
-   printf("Server Connected. Waiting for client requests");
-
-   listen(sockfd,5);
-   clilen = sizeof(cli_addr);
-   
-  while (1) {
-	   newsockfd = accept(sockfd, (struct sockaddr *)&cli_addr, &clilen);
-	
-	   if (newsockfd < 0) {
-	      perror("ERROR on accept");
-	      exit(1);
-	   }
-   
-   /* Connection is established, start communicating */
-
-	 pid = fork();
-         if (pid < 0)
-             error("ERROR on fork");
-         if (pid == 0)  {
-             close(sockfd);	
-
-/*fill buffer with 0s,reading client message from socket to buffer*/
-	     bzero(buffer,256);
-	     char str[50];
-	     strcpy(str,buffer);
-             //handleRequest(str);
-	     handleFiles(newsockfd,str);
-  
- 	    exit(0);
-         }
-	/*if not child process, the parent process closes newsockfd*/
-         else close(newsockfd);
-   }
-   return 0;
+return 0;
 }
 
